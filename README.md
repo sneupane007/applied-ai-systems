@@ -15,6 +15,114 @@ My version, **VibeMatch 1.0**, is a small content-based recommender. It loads 18
 
 ---
 
+## VibeMatch 2.0: songs for this moment
+
+VibeMatch 2.0 recommends real songs for the moment you're in. You pick a mood picture, an energy level, and what you want from the music, and say where you are. It also uses the weather in your city, the time of day, and (simulated) phone signals: heart rate, notifications, and sleep. A **research-based manual** turns all of that into a target sound. VibeMatch then **retrieves** the 8 closest songs from a 152-song catalog, and Claude picks and orders 5 of them **using only those songs and the matching manual rules**. A check rejects anything Claude names that it wasn't given. With no API key, VibeMatch still works in offline mode.
+
+### What's new compared with 1.0
+
+| | 1.0 | 2.0 |
+|---|---|---|
+| Songs | 18 made-up songs | 152 real songs from the [Spotify Tracks Dataset](https://huggingface.co/datasets/maharshipandya/spotify-tracks-dataset) ([how they were picked](data/CATALOG_SOURCE.md)) |
+| Input | A fixed profile dict | Mood card, energy, goal, place, weather, time of day, simulated phone signals, optional note |
+| Matching | Points for exact genre/mood labels | Distance in (energy, valence, acousticness) space, so near misses still count |
+| Knowledge | None | [Music & mood manual](knowledge/music_mood_manual.md): 12 rules, each with evidence level and sources |
+| AI | None | RAG: Claude (`claude-haiku-5-5`) picks from the retrieved songs and cites manual rule IDs |
+| Interface | Command line | Streamlit page (`app.py`); the 1.0 command line still works |
+
+### How it works
+
+```
+your moment (mood card, energy, goal, place, note, weather, time, phone signals)
+   │
+   ├─► context.py   turns it into coarse labels (low_mood, night, rain, hr_high_resting, …)
+   │                and a starting point from what you said
+   ├─► manual.py    picks the manual rules that match those labels (always M-00, M-10, M-11)
+   │                their nudges move the target point (at most ±0.25 per axis in total)
+   ├─► privacy.py   lets only the target sound go to the music source, and only labels go to the AI
+   ├─► retrieval.py finds the 8 closest songs (max 1 per artist; songs outside a rule's
+   │                preferred tempo/instrumental range rank lower)          ◄── retrieval
+   ├─► explainer.py Claude picks and orders 5 of the 8, citing rule IDs     ◄── generation
+   │                check: only retrieved songs and matched rules survive; ≥ 3 valid picks or
+   │                fall back to offline; at most 2 very sad songs for a low mood; order follows the goal
+   └─► app.py       shows the picks, reasons, target, labels, rules, and all 8 candidates
+```
+
+**Why this counts as RAG:** Claude never sees the whole catalog. Each request contains only the 8 songs retrieved for this moment and the manual rules that matched it, and the answer is accepted only if it sticks to them. Changing the moment changes what is retrieved, which changes what Claude can recommend.
+
+The three parts most likely to change later are each a small interface: signal sources (phone signals are simulated today), the reasoner (`ClaudeReasoner` today, a local model later, with the template fallback already a second implementation), and the music source (`LocalCatalog` today, Spotify later).
+
+### Guardrails and logging
+
+- **Input checks:** mood card, energy, goal, place, and weather must be known values. Hour 0–23, heart rate 30–220, notifications 0–999, sleep 0–24 h, city ≤ 80 characters, note ≤ 200 characters.
+- **Grounding check:** song IDs must be among the 8 retrieved and rule IDs among the matched rules. Duplicates are dropped and reasons are capped at 300 characters. Fewer than 3 valid picks means offline picks.
+- **Failures fall back to offline mode:** no key, rejected key, rate limit, timeout, connection error, server error, refusal, cut-off answer, or unreadable JSON. The page always shows songs and says which mode it ran in.
+- **Privacy:**
+
+  | Data | Sent to Claude | Sent to the music source | Written to the log |
+  |---|---|---|---|
+  | Mood card, energy level, goal, place | Yes | No | Yes |
+  | Weather category, time of day | Yes | No | Yes |
+  | Heart rate, notifications, sleep | Only as labels ("heart rate up") | No | Only as labels |
+  | City | No (sent only to Open-Meteo) | No | No |
+  | Note text | Yes | No | Length only |
+  | Target sound + preferred ranges | Yes | Yes (the only thing it gets) | Yes |
+
+- **Safety:** if the note mentions self-harm or a crisis, the page shows support resources (988 in the US, findahelpline.com elsewhere). It uses offline picks and the note isn't sent anywhere. VibeMatch is not therapy.
+- **Logging:** every run writes to `logs/vibematch.log` under a run ID. Each run records the inputs (as categories), labels, rules, nudges, target point, retrieved songs and distances, mode, latency, request ID, rejected IDs, and what the check changed. `tests/test_vibe.py` checks that raw signal numbers and note text never reach the log.
+
+### Setup and run (2.0)
+
+Tested with Python 3.14.6 on macOS.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+# Optional: turn on AI mode (otherwise the app runs offline with template reasons)
+cp .env.example .env               # then paste your Anthropic API key after ANTHROPIC_API_KEY=
+
+streamlit run app.py               # opens http://localhost:8501
+```
+
+- **Tests:** `python -m pytest` runs 92 tests with no network access. Weather and Claude are mocked, and the Streamlit page is tested headlessly.
+- **Rebuild the catalog (optional, downloads ~20 MB):** `python scripts/build_catalog.py`
+- **The 1.0 command-line demo:** `python -m src.main`
+
+Run commands from the project root, because paths like `data/catalog.csv` are relative.
+
+### Sample run (offline mode)
+
+Inputs: **Rainy window**, energy **Low**, goal **Match my mood**, **Home**, **night**, **rainy**, note "nothing too sad, just cozy".
+
+```
+labels:  goal_match, home, low_mood, night, rain
+rules:   M-00, M-02 wind down, M-05 low mood, M-08 time of day, M-09 weather, M-10, M-11
+nudges:  M-02 acoustic +0.05 · M-08 night energy -0.10 · M-09 rain energy -0.10, acoustic +0.15
+target:  energy 0.075 · valence 0.25 · acoustic 0.80
+
+1. In The End · Regnør (piano, energy 0.04, valence 0.15, 92 bpm)
+2. Préludes / Book 1, L. 117: 8. La fille aux cheveux de lin · Claude Debussy, Jean-Rodolphe Kars (classical, energy 0.01, valence 0.22, 72 bpm)
+3. Lonesome Town · Ricky Nelson (r-n-b, energy 0.19, valence 0.27, 77 bpm)
+4. The Choice · Gustavo Santaolalla, Alan Umstead (ambient, energy 0.00, valence 0.35, 51 bpm)
+5. At Dawn · Ever So Blue (piano, energy 0.03, valence 0.36, 116 bpm)
+
+check: swapped 2 very sad songs for warmer ones (M-05) · reordered so valence steps up (M-10)
+```
+
+In AI mode, Claude writes a one-sentence reason for each pick and cites rules such as `M-05, M-09`; the same check then applies.
+
+### Limitations of 2.0
+
+- **AI mode hasn't been run live yet.** It's tested with a fake Claude client. A real run needs an API key, and the quality of `claude-haiku-5-5` at choosing picks and citing rules is unverified. Switching to `claude-opus-5-5` is one line in `src/explainer.py`.
+- **Phone signals are simulated.** Real heart rate or notifications would need a phone app (e.g. HealthKit or Health Connect).
+- **Small, mainstream catalog:** 152 songs with popularity ≥ 50. The features are Spotify's estimates and some genre labels are odd. Whether Spotify-derived data may be shared is unclear (see [CATALOG_SOURCE.md](data/CATALOG_SOURCE.md)).
+- **The manual is a starting point.** Most figures come from abstracts and summaries, the exact nudges are our defaults, and people differ: weather and time affect people differently. Sensed signals mostly show *how worked-up* someone is, not whether they feel good or bad.
+- **Not therapy or medical advice.**
+
+---
+
 ## How The System Works
 
 ### How real recommenders work (and what mine does)
@@ -92,6 +200,7 @@ User prefs ──► for each song in songs.csv: score_song(prefs, song) → (sc
    python -m venv .venv
    source .venv/bin/activate      # Mac or Linux
    .venv\Scripts\activate         # Windows
+   ```
 
 2. Install dependencies
 
