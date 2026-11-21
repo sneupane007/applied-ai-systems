@@ -270,3 +270,53 @@ Making energy stronger fixed the *Gym Hero* problem for the pop fan, but it hurt
 **How it changed how I see music apps:** Now when an app keeps suggesting the same kind of song, I wonder which weight is doing it.
 
 **What I'd try next:** Add partial credit for related genres and moods, then add a simple collaborative filter using a few made-up users' likes, to see how the lists change compared to content alone.
+
+---
+
+## 10. VibeMatch 2.0 (context-aware, RAG)
+
+Sections 1–9 describe VibeMatch 1.0. This section covers 2.0, which runs in `app.py`; the 1.0 command-line app is unchanged.
+
+**Intended use.** A class project that shows how an AI can recommend music for the moment you're in, while keeping personal data on your device. It's for exploring and learning, not for real listeners' wellbeing. It is **not therapy or medical advice**, and its phone signals are simulated.
+
+**How it works.**
+1. Your moment (mood card, energy level, goal, place, weather, time of day, simulated heart rate, notifications, and sleep) becomes coarse labels and a starting point.
+2. Rules from the [music & mood manual](knowledge/music_mood_manual.md) that match those labels nudge the point by at most ±0.25 per axis.
+3. The 8 closest of 152 real songs are retrieved.
+4. Claude (`claude-haiku-5-5`) picks and orders 5 of them, citing rule IDs.
+5. A check keeps only retrieved songs and matched rules, caps very sad songs at 2 for a low mood, and orders the set along the goal.
+6. If anything fails, template reasons are used instead.
+
+**Data.** 152 songs from the Spotify Tracks Dataset on Hugging Face: 18 genres, popularity ≥ 50, 38 songs per valence/energy quadrant, seed 42. See [CATALOG_SOURCE.md](data/CATALOG_SOURCE.md). The features (energy, valence, acousticness, instrumentalness) are Spotify's model estimates.
+
+**The manual and its evidence.** 12 rules, each labeled `strong`, `moderate`, `limited`, or `design rule`, with sources.
+- Strong: music lowers stress (de Witte et al. 2020).
+- Moderate:
+  - sleep music at 60–80 bpm
+  - lyrics hurting focus (Vasilev et al. 2018)
+  - 120–140 bpm for workouts
+  - short sleep lowering mood (Palmer et al. 2024)
+  - time-of-day and weather effects that are small and personal (Golder & Macy 2011; Denissen et al. 2008; Klimstra et al. 2011)
+- Limited: how to handle low mood (Garrido & Schubert 2013) and tension (Sharman & Dingle 2015).
+- Most figures were taken from abstracts and summaries, not full papers.
+
+**Evaluation.**
+- 92 automated tests, with no network. They cover rule parsing and matching, the worked example (target energy 0.075, valence 0.25, acoustic 0.80), privacy allow-lists, retrieval, the weather code mapping and failures, the grounding check (unknown song and rule IDs rejected, fewer than 3 valid picks falls back), and the full pipeline for rainy night, gym, focus, high resting heart rate, and crisis notes.
+- The tests also check that the logs never contain raw signals or note text, and that the Streamlit page works in a headless run.
+- One live Open-Meteo call (Boston) matched the code's expectations.
+- **AI mode has not been run against the real Claude API yet.** It's tested with a fake client only.
+
+**What tuning showed.** At first, songs outside a preferred range lost a flat 0.15. In the focus scenario that left only 1 instrumental song among the 8 candidates, so Claude couldn't follow the "avoid lyrics" rule. Raising the flat penalty fixed focus but broke calming: songs with energy up to 0.56 got in just because their tempo was in range. A penalty that grows with *how far* outside the range a song falls fixed both. Focus got 4 of 8 instrumental, and the calm set stayed at energy 0.24–0.38.
+
+**Biases and risks.**
+- "Rain means mellow" and similar nudges are defaults that won't fit everyone. Some people feel better in the rain.
+- Popularity ≥ 50 favors mainstream artists.
+- Some genre labels in the dataset are odd.
+- Sensed signals mostly show *how worked-up* someone is, not whether they feel good or bad, so the system relies on what you say.
+- Emotion inference is error-prone in general (EU AI Act, Recital 44). The page shows every label and rule it used so you can see and override them.
+
+**Privacy.**
+- Raw signals, the city, and the exact hour never reach Claude or the music source.
+- Claude sees coarse labels, your choices, and your note.
+- The music source sees only the target sound.
+- If a note mentions self-harm or a crisis, the app shows support resources (988 in the US), uses offline picks, and doesn't send the note anywhere.
