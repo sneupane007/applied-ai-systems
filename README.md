@@ -37,62 +37,73 @@ VibeMatch 2.0 recommends real songs for the moment you're in. You pick a mood pi
 
 The diagram's source is [`diagrams/architecture.mmd`](diagrams/architecture.mmd), and GitHub renders the copy below. Data flows from top to bottom:
 
-1. **Input.** The listener fills in the Streamlit page (`app.py`) or runs the preset moments in `src/demo.py`. An optional city is sent only to Open-Meteo, to look up the weather.
-2. **Validation and context.** Unknown or out-of-range input stops the run with an error. Valid input becomes coarse labels (`low_mood`, `night`, `rain`, `hr_high_resting`, …) and a starting point in (energy, valence, acousticness).
-3. **Knowledge and retrieval.** The manual rules that match those labels nudge the point into a target sound. Only the target and the preferred ranges go to the music source, which returns the 8 nearest songs.
-4. **Generation and checks.** If the note doesn't trigger the crisis check and an API key is set, Claude picks and orders 5 of the 8 and cites rule IDs. The grounding check throws out anything Claude wasn't given, and any failure falls back to offline picks. Either way, the manual's set rules (M-05, M-10) are then applied in code.
-5. **Humans and testing.** The listener sees the labels, rules, and all 8 candidates behind the picks, so they can tell when VibeMatch misread them and change their inputs. The developer reviews `logs/vibematch.log` and the test suite, where a fake Claude stands in for the real one.
+1. **Input.** The listener types a prompt on the Streamlit page (`app.py`), optionally sets a mood card, energy, goal, and place, and picks a listening history (none, or one of three demo personas). `src/demo.py` runs three preset moments instead. An optional city is sent only to Open-Meteo, to look up the weather.
+2. **Validation, safety, and reading the prompt.** Unknown or out-of-range input stops the run with an error. A prompt with crisis words shows support resources first and keeps Claude out of the rest of the run. The prompt is then read into the page's own choices (by Claude when a key is set, by keywords otherwise), filling only what the listener left on Auto. The result becomes coarse labels (`low_mood`, `night`, `rain`, `hr_high_resting`, …) and a starting point in (energy, valence, acousticness).
+3. **History, knowledge, and retrieval.** Plays from similar past moments pull the starting point toward the listener's usual sound (by at most 40%). The manual rules that match the labels nudge it into a target sound. Only the target and the preferred ranges go to the music source, which returns the 16 nearest songs. These are re-ranked on the device by history and named genres, and the top 8 are kept.
+4. **Generation and checks.** If an API key is set and there was no crisis, Claude picks and orders 5 of the 8 and cites rule IDs. The grounding check throws out anything Claude wasn't given, and any failure falls back to offline picks. Either way, the manual's set rules (M-05, M-10) are then applied in code.
+5. **Humans and testing.** The listener sees how the prompt was read, what history added, and the labels, rules, and all 8 candidates behind the picks. That lets them tell when VibeMatch misread them and change their inputs. The developer reviews `logs/vibematch.log` and the test suite, where a fake Claude stands in for the real one.
 
 ```mermaid
 flowchart TD
-    %% VibeMatch 2.0 architecture. Data flows from the listener (top) to the picks (bottom).
+    %% VibeMatch 2.1 architecture. Data flows from the listener (top) to the picks (bottom).
     %% Each box names the file that does the work. Dotted lines carry data to checks and logs.
     subgraph INPUT["1 · Input: app.py (Streamlit page) or src/demo.py"]
         LISTENER(["Listener"])
-        FORM["Mood card, energy level, goal, place, time of day, note<br/>Simulated phone signals: heart rate, notifications, sleep"]
+        PROMPT["Typed prompt"]
+        FORM["Optional fine-tune: mood card, energy level, goal, place<br/>Time of day · simulated phone signals: heart rate, notifications, sleep"]
+        PERSONA["Listening history: none or a demo persona"]
         CITY["City (optional)"]
+        LISTENER --> PROMPT
         LISTENER --> FORM
+        LISTENER --> PERSONA
         LISTENER --> CITY
     end
 
     CITY --> WEATHER["weather.py<br/>Open-Meteo lookup"]
     WEATHER -->|"weather category + local hour,<br/>or a 'weather skipped' message"| VALID
+    PROMPT --> VALID
     FORM --> VALID{"context.validate<br/>known values, in range?"}
     VALID -->|no| ERROR["Error shown to the listener<br/>nothing else runs"]
-    VALID -->|yes| CONTEXT["context.py<br/>coarse labels + starting point"]
+    VALID -->|yes| CRISIS{"vibe.needs_support<br/>crisis words in the prompt?"}
+    CRISIS -->|yes| SUPPORT["Support message (988) shown first<br/>Claude skipped for reading and for picking"]
+    CRISIS -->|no| READ
+    SUPPORT --> READ["intent.py · read_prompt<br/>prompt → mood, energy, goal, place, weather,<br/>no lyrics, nothing too sad, genres to like or avoid<br/>Claude reads it if a key is set, else keywords<br/>fills only what was left on Auto"]
+    READ --> CONTEXT["context.py<br/>coarse labels + starting point"]
 
     subgraph KNOWLEDGE["2 · Knowledge sources"]
         MANUAL[("knowledge/music_mood_manual.md<br/>12 hand-written rules with evidence levels")]
-        CATALOG[("data/catalog.csv<br/>152 real songs, Spotify features")]
+        CATALOG[("data/catalog.csv<br/>152 real songs, Spotify features + track IDs")]
+        HISTORY[("data/listening_history.csv<br/>925 made-up plays, 3 personas")]
     end
 
-    CONTEXT --> MATCH["manual.py<br/>match rules, nudge the target<br/>at most ±0.25 per axis"]
+    PERSONA --> PROFILE
+    HISTORY --> PROFILE
+    CONTEXT --> PROFILE["history.py · profile_for<br/>plays from similar moments → usual sound<br/>pulls the starting point by at most 40%"]
+    PROFILE --> MATCH["manual.py<br/>match rules, nudge the target<br/>at most ±0.25 per axis"]
     MANUAL --> MATCH
     MATCH --> PRIVACY["privacy.py<br/>allow-list per destination"]
-    PRIVACY -->|"target sound + preferred ranges only"| RETRIEVE["retrieval.py<br/>8 nearest songs, max 1 per artist"]
+    PRIVACY -->|"target sound + preferred ranges only"| RETRIEVE["retrieval.py<br/>16 nearest songs, max 1 per artist"]
     CATALOG --> RETRIEVE
+    RETRIEVE --> RERANK["history.py · rerank, on the device<br/>familiar songs up; often skipped and avoided genres down<br/>keep 8"]
 
-    RETRIEVE --> CRISIS{"vibe.needs_support<br/>crisis words in the note?"}
-    CRISIS -->|yes| SUPPORT["Support message (988)<br/>AI skipped, note not sent"]
-    CRISIS -->|no| KEY{"API key set?"}
+    RERANK --> KEY{"API key set<br/>and no crisis?"}
     KEY -->|yes| CLAUDE["explainer.py · ClaudeReasoner<br/>claude-haiku-5-5, JSON schema<br/>picks and orders 5 of the 8, cites rule IDs"]
-    PRIVACY -.->|"labels, choices, note<br/>no raw signals, no city"| CLAUDE
+    PRIVACY -.->|"labels, choices, prompt, one-line history summary,<br/>played-before IDs; no raw signals, plays, or city"| CLAUDE
     MATCH -.->|"matched rules"| CLAUDE
 
     CLAUDE --> GROUND{"Grounding check<br/>only retrieved songs and matched rules<br/>at least 3 valid picks?"}
     CLAUDE -->|"API error, refusal,<br/>cut-off answer, bad JSON"| OFFLINE
     GROUND -->|no| OFFLINE["Offline fallback<br/>5 closest songs + template reasons"]
     KEY -->|no| OFFLINE
-    SUPPORT --> OFFLINE
     GROUND -->|yes| SHAPE
-    OFFLINE --> SHAPE["Set rules in code<br/>M-05: at most 2 very sad songs for a low mood<br/>M-10: order the set along the goal"]
+    OFFLINE --> SHAPE["Set rules in code<br/>M-05: at most 2 very sad songs for a low mood or 'nothing too sad'<br/>M-10: order the set along the goal"]
 
-    SHAPE --> OUTPUT["3 · Output<br/>5 songs with reasons, mode, target sound,<br/>labels, rules used, all 8 candidates"]
+    SHAPE --> OUTPUT["3 · Output<br/>5 songs with reasons and Spotify links, how the prompt was read,<br/>what history added, target sound, labels, rules used, all 8 candidates"]
     OUTPUT --> REVIEW(["Listener sees what VibeMatch noticed and why,<br/>changes inputs, and runs again"])
 
     subgraph CHECKS["4 · Checking the system"]
-        LOG[("logs/vibematch.log<br/>per run ID: labels, rules, retrieved IDs, mode,<br/>latency, rejected IDs; no raw signals or note text")]
-        TESTS["pytest: 93 tests, no network<br/>fake Claude and mocked weather check validation,<br/>grounding, fallback, privacy, logs, the page"]
+        LOG[("logs/vibematch.log<br/>per run ID: labels, rules, history strength, retrieved IDs, mode,<br/>latency, rejected IDs; no raw signals, prompt text, or plays")]
+        TESTS["pytest: 128 tests, no network<br/>fake Claude, fake prompt reader, and mocked weather check validation,<br/>prompt reading, history, grounding, fallback, privacy, logs, the page"]
         DEVELOPER(["Developer reviews logs and test results"])
         LOG --> DEVELOPER
         TESTS --> DEVELOPER
@@ -105,15 +116,18 @@ flowchart TD
 ### Module by module
 
 ```
-your moment (mood card, energy, goal, place, note, weather, time, phone signals)
+your moment (prompt, optional mood card / energy / goal / place, weather, time, phone signals)
    │
+   ├─► intent.py    reads the prompt into those same choices (only the ones left on Auto)
    ├─► context.py   turns it into coarse labels (low_mood, night, rain, hr_high_resting, …)
    │                and a starting point from what you said
+   ├─► history.py   pulls the starting point toward your usual sound in similar moments
    ├─► manual.py    picks the manual rules that match those labels (always M-00, M-10, M-11)
    │                their nudges move the target point (at most ±0.25 per axis in total)
    ├─► privacy.py   lets only the target sound go to the music source, and only labels go to the AI
-   ├─► retrieval.py finds the 8 closest songs (max 1 per artist; songs outside a rule's
+   ├─► retrieval.py finds the 16 closest songs (max 1 per artist; songs outside a rule's
    │                preferred tempo/instrumental range rank lower)          ◄── retrieval
+   ├─► history.py   re-ranks them on the device (familiar up, skipped and avoided genres down), keeps 8
    ├─► explainer.py Claude picks and orders 5 of the 8, citing rule IDs     ◄── generation
    │                check: only retrieved songs and matched rules survive; ≥ 3 valid picks or
    │                fall back to offline; at most 2 very sad songs for a low mood; order follows the goal

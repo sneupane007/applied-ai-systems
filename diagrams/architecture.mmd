@@ -1,52 +1,63 @@
 flowchart TD
-    %% VibeMatch 2.0 architecture. Data flows from the listener (top) to the picks (bottom).
+    %% VibeMatch 2.1 architecture. Data flows from the listener (top) to the picks (bottom).
     %% Each box names the file that does the work. Dotted lines carry data to checks and logs.
     subgraph INPUT["1 · Input: app.py (Streamlit page) or src/demo.py"]
         LISTENER(["Listener"])
-        FORM["Mood card, energy level, goal, place, time of day, note<br/>Simulated phone signals: heart rate, notifications, sleep"]
+        PROMPT["Typed prompt"]
+        FORM["Optional fine-tune: mood card, energy level, goal, place<br/>Time of day · simulated phone signals: heart rate, notifications, sleep"]
+        PERSONA["Listening history: none or a demo persona"]
         CITY["City (optional)"]
+        LISTENER --> PROMPT
         LISTENER --> FORM
+        LISTENER --> PERSONA
         LISTENER --> CITY
     end
 
     CITY --> WEATHER["weather.py<br/>Open-Meteo lookup"]
     WEATHER -->|"weather category + local hour,<br/>or a 'weather skipped' message"| VALID
+    PROMPT --> VALID
     FORM --> VALID{"context.validate<br/>known values, in range?"}
     VALID -->|no| ERROR["Error shown to the listener<br/>nothing else runs"]
-    VALID -->|yes| CONTEXT["context.py<br/>coarse labels + starting point"]
+    VALID -->|yes| CRISIS{"vibe.needs_support<br/>crisis words in the prompt?"}
+    CRISIS -->|yes| SUPPORT["Support message (988) shown first<br/>Claude skipped for reading and for picking"]
+    CRISIS -->|no| READ
+    SUPPORT --> READ["intent.py · read_prompt<br/>prompt → mood, energy, goal, place, weather,<br/>no lyrics, nothing too sad, genres to like or avoid<br/>Claude reads it if a key is set, else keywords<br/>fills only what was left on Auto"]
+    READ --> CONTEXT["context.py<br/>coarse labels + starting point"]
 
     subgraph KNOWLEDGE["2 · Knowledge sources"]
         MANUAL[("knowledge/music_mood_manual.md<br/>12 hand-written rules with evidence levels")]
-        CATALOG[("data/catalog.csv<br/>152 real songs, Spotify features")]
+        CATALOG[("data/catalog.csv<br/>152 real songs, Spotify features + track IDs")]
+        HISTORY[("data/listening_history.csv<br/>925 made-up plays, 3 personas")]
     end
 
-    CONTEXT --> MATCH["manual.py<br/>match rules, nudge the target<br/>at most ±0.25 per axis"]
+    PERSONA --> PROFILE
+    HISTORY --> PROFILE
+    CONTEXT --> PROFILE["history.py · profile_for<br/>plays from similar moments → usual sound<br/>pulls the starting point by at most 40%"]
+    PROFILE --> MATCH["manual.py<br/>match rules, nudge the target<br/>at most ±0.25 per axis"]
     MANUAL --> MATCH
     MATCH --> PRIVACY["privacy.py<br/>allow-list per destination"]
-    PRIVACY -->|"target sound + preferred ranges only"| RETRIEVE["retrieval.py<br/>8 nearest songs, max 1 per artist"]
+    PRIVACY -->|"target sound + preferred ranges only"| RETRIEVE["retrieval.py<br/>16 nearest songs, max 1 per artist"]
     CATALOG --> RETRIEVE
+    RETRIEVE --> RERANK["history.py · rerank, on the device<br/>familiar songs up; often skipped and avoided genres down<br/>keep 8"]
 
-    RETRIEVE --> CRISIS{"vibe.needs_support<br/>crisis words in the note?"}
-    CRISIS -->|yes| SUPPORT["Support message (988)<br/>AI skipped, note not sent"]
-    CRISIS -->|no| KEY{"API key set?"}
+    RERANK --> KEY{"API key set<br/>and no crisis?"}
     KEY -->|yes| CLAUDE["explainer.py · ClaudeReasoner<br/>claude-haiku-5-5, JSON schema<br/>picks and orders 5 of the 8, cites rule IDs"]
-    PRIVACY -.->|"labels, choices, note<br/>no raw signals, no city"| CLAUDE
+    PRIVACY -.->|"labels, choices, prompt, one-line history summary,<br/>played-before IDs; no raw signals, plays, or city"| CLAUDE
     MATCH -.->|"matched rules"| CLAUDE
 
     CLAUDE --> GROUND{"Grounding check<br/>only retrieved songs and matched rules<br/>at least 3 valid picks?"}
     CLAUDE -->|"API error, refusal,<br/>cut-off answer, bad JSON"| OFFLINE
     GROUND -->|no| OFFLINE["Offline fallback<br/>5 closest songs + template reasons"]
     KEY -->|no| OFFLINE
-    SUPPORT --> OFFLINE
     GROUND -->|yes| SHAPE
-    OFFLINE --> SHAPE["Set rules in code<br/>M-05: at most 2 very sad songs for a low mood<br/>M-10: order the set along the goal"]
+    OFFLINE --> SHAPE["Set rules in code<br/>M-05: at most 2 very sad songs for a low mood or 'nothing too sad'<br/>M-10: order the set along the goal"]
 
-    SHAPE --> OUTPUT["3 · Output<br/>5 songs with reasons, mode, target sound,<br/>labels, rules used, all 8 candidates"]
+    SHAPE --> OUTPUT["3 · Output<br/>5 songs with reasons and Spotify links, how the prompt was read,<br/>what history added, target sound, labels, rules used, all 8 candidates"]
     OUTPUT --> REVIEW(["Listener sees what VibeMatch noticed and why,<br/>changes inputs, and runs again"])
 
     subgraph CHECKS["4 · Checking the system"]
-        LOG[("logs/vibematch.log<br/>per run ID: labels, rules, retrieved IDs, mode,<br/>latency, rejected IDs; no raw signals or note text")]
-        TESTS["pytest: 93 tests, no network<br/>fake Claude and mocked weather check validation,<br/>grounding, fallback, privacy, logs, the page"]
+        LOG[("logs/vibematch.log<br/>per run ID: labels, rules, history strength, retrieved IDs, mode,<br/>latency, rejected IDs; no raw signals, prompt text, or plays")]
+        TESTS["pytest: 128 tests, no network<br/>fake Claude, fake prompt reader, and mocked weather check validation,<br/>prompt reading, history, grounding, fallback, privacy, logs, the page"]
         DEVELOPER(["Developer reviews logs and test results"])
         LOG --> DEVELOPER
         TESTS --> DEVELOPER
