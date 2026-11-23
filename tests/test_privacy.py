@@ -34,3 +34,16 @@ def test_music_source_gets_only_the_music_intent():
 def test_unlisted_fields_are_blocked():
     with pytest.raises(ValueError):
         _only({"target": {}, "heart_rate": 137}, MUSIC_FIELDS)
+
+
+def test_reasoner_gets_a_history_summary_not_the_plays():
+    payload = for_reasoner(RAW, labels_for(RAW), history="23 similar past plays, usually darker", played_before=[9, 4])
+    assert payload["history"] == "23 similar past plays, usually darker"
+    assert payload["played_before"] == [4, 9]
+    with pytest.raises(ValueError):
+        _only({**payload, "plays": [{"song_id": 4, "played_at": "2026-10-01T23:00"}]}, REASONER_FIELDS)
+
+
+def test_auto_fields_reach_the_reasoner_as_not_given():
+    payload = for_reasoner(Moment(hour=9, goal="match"), ["goal_match", "morning"])
+    assert payload["mood"] == payload["energy_level"] == payload["place"] == "not given"

@@ -35,14 +35,20 @@ MANY_NOTIFICATIONS = 10
 SHORT_SLEEP_HOURS = 6
 
 
+NEUTRAL = {"energy": 0.5, "valence": 0.5, "acousticness": 0.5}
+
+
 @dataclass
 class Moment:
-    """Everything the listener tells the app, plus the simulated phone signals."""
-    mood_card: str
-    energy_level: str
-    goal: str
-    place: str
+    """Everything the listener tells the app, plus the simulated phone signals.
+
+    None means "Auto": the typed prompt (note) may fill it in, and the pipeline defaults the goal to "match".
+    """
     hour: int  # local hour, 0-23
+    mood_card: Optional[str] = None
+    energy_level: Optional[str] = None
+    goal: Optional[str] = None
+    place: Optional[str] = None
     weather: Optional[str] = None
     heart_rate: Optional[int] = None
     notifications: Optional[int] = None
@@ -51,14 +57,14 @@ class Moment:
 
 
 def validate(moment: Moment) -> None:
-    """Raise ValueError if any input is unknown or out of range."""
-    if moment.mood_card not in MOOD_CARDS:
+    """Raise ValueError if any input is unknown or out of range (None is allowed for the Auto fields)."""
+    if moment.mood_card is not None and moment.mood_card not in MOOD_CARDS:
         raise ValueError(f"Unknown mood card: {moment.mood_card}")
-    if moment.energy_level not in ENERGY_LEVELS:
+    if moment.energy_level is not None and moment.energy_level not in ENERGY_LEVELS:
         raise ValueError(f"Unknown energy level: {moment.energy_level}")
-    if moment.goal not in GOALS:
+    if moment.goal is not None and moment.goal not in GOALS:
         raise ValueError(f"Unknown goal: {moment.goal}")
-    if moment.place not in PLACES:
+    if moment.place is not None and moment.place not in PLACES:
         raise ValueError(f"Unknown place: {moment.place}")
     if not 0 <= moment.hour <= 23:
         raise ValueError(f"Hour must be 0-23, got {moment.hour}")
@@ -84,20 +90,27 @@ def time_of_day(hour: int) -> str:
     return "night"
 
 
-def base_point(moment: Moment) -> Dict[str, float]:
-    """Starting point from what the listener said: the mood card, with energy averaged with the energy level."""
-    card = MOOD_CARDS[moment.mood_card]
-    return {
-        "energy": round((card["energy"] + ENERGY_LEVELS[moment.energy_level]) / 2, 3),
-        "valence": card["valence"],
-        "acousticness": card["acousticness"],
-    }
+def base_point(moment: Moment, fallback: Optional[Dict[str, float]] = None) -> Dict[str, float]:
+    """Starting point from what the listener said: the mood card, with energy averaged with the energy level.
+
+    Without a mood card it starts from `fallback` (their usual sound from history), else the neutral middle.
+    """
+    point = MOOD_CARDS[moment.mood_card] if moment.mood_card else (fallback or NEUTRAL)
+    energy = point["energy"]
+    if moment.energy_level:
+        energy = (energy + ENERGY_LEVELS[moment.energy_level]) / 2
+    return {"energy": round(energy, 3), "valence": point["valence"], "acousticness": point["acousticness"]}
 
 
 def labels_for(moment: Moment) -> List[str]:
-    """Coarse labels the manual's rules match on. Raw signal numbers stay here."""
+    """Coarse labels the manual's rules match on. Raw signal numbers stay here.
+
+    Mood labels come only from what the listener said, never from their history.
+    """
     base = base_point(moment)
-    labels = {f"goal_{moment.goal}", moment.place, time_of_day(moment.hour)}
+    labels = {f"goal_{moment.goal}", time_of_day(moment.hour)}
+    if moment.place:
+        labels.add(moment.place)
     if base["valence"] < 0.35:
         labels.add("tense_mood" if base["energy"] > 0.65 else "low_mood")
     if moment.weather in WEATHER_LABELS:

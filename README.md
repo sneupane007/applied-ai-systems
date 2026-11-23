@@ -336,13 +336,93 @@ run=2b96f0e7 check: Swapped 2 very sad song(s) for warmer ones (M-05).
 
 ---
 
+## VibeMatch 2.1: your prompt and your listening history
+
+In 2.1 you can just type what you want to hear ("rainy night, need to focus, no lyrics"). VibeMatch reads the prompt into the same choices the page offers. It also uses a **listening history** to learn what *you* usually play in moments like this one: this time of day, this weather, this place. The mood cards and the energy, goal, and place controls are now optional. Anything you set yourself wins over the prompt. Each pick has an **Open in Spotify** link.
+
+The histories are **made-up demo data** for three personas (student, gym-goer, night owl). See [HISTORY_SOURCE.md](data/HISTORY_SOURCE.md) for how they were generated and which patterns were planted.
+
+### What's new compared with 2.0
+
+| | 2.0 | 2.1 |
+|---|---|---|
+| Main input | Mood card (required) + controls + optional note | A typed prompt; the mood card, energy, goal, and place are optional overrides |
+| The note / prompt | Only Claude read it, at the last step | It's read **before** retrieval, so it changes which songs are found |
+| Memory | None | Demo listening history (song, time, weather, place, finished or skipped) |
+| Retrieval | 8 nearest songs | 16 nearest, then re-ranked on the device (familiar songs up, songs you usually skip down, genres you named), keep 8 |
+| Spotify | Data source only | "Open in Spotify" link for every pick; optional embedded players |
+
+### How it works
+
+```
+prompt ─► crisis check first (a hit means: no Claude, keywords only, support message)
+       ─► intent.py   prompt → mood card, energy, goal, place, weather, no lyrics, nothing too sad,
+       │              genres to like/avoid   (Claude reads it; keywords when offline or on any failure)
+       │              only fills what you left on Auto; every value must be a known choice
+history ─► history.py past plays weighted by how much they match now (time of day, weather, place;
+       │              weight = matches²) → your usual sound here
+       ├─► starting point: your mood card pulled up to 40% toward your usual sound
+       │                   (no mood card: start from your usual sound; no history either: the middle)
+       ├─► manual rules and nudges, as in 2.0 → target sound
+       ├─► retrieval: 16 nearest songs → re-rank on device → 8 candidates
+       └─► Claude picks 5 (it also sees a one-line history summary and which candidates you've played)
+           → grounding check, as in 2.0 → picks with Spotify links
+```
+
+**Why it doesn't need the AI to read every song:** retrieval narrows 152 songs to 8 using plain arithmetic on energy, valence, and acousticness. The prompt and the history move the *target* of that search. Claude only chooses among the 8 it's given. The same setup would work with a catalog of millions.
+
+**How much history counts:** each finished play gets a weight from how many of the three context fields match the moment (1, 4, or 9). The weights are added up and divided by 9, so a play that matches all three counts as one "similar play". With `n` similar plays, history moves your starting point by `0.4 × n / (n + 20)`. So 20 similar plays move it 20% of the way, and it never moves more than 40%. Mood labels such as "low mood" come only from what you say, never from your history.
+
+**Example (offline, prompt "rainy night, need to focus", weather rainy, night):**
+
+| History | Reads as | Target (energy · valence · acoustic) | Top pick |
+|---|---|---|---|
+| None | goal: focus | 0.30 · 0.50 · 0.65 | The Calm Place |
+| Student | 31 similar plays, usually low energy, darker, acoustic | 0.07 · 0.37 · 0.92 | The Choice |
+| Gym-goer | 3 similar plays, usually high energy, brighter, electronic | 0.48 · 0.60 · 0.28 | Just the Two of Us |
+| Night owl | 23 similar plays, usually darker | 0.20 · 0.30 · 0.72 | The Calm Place (then Weightless) |
+
+### Spotify
+
+Spotify blocked new apps from its Audio Features, Recommendations, Related Artists, and some other Web API endpoints on 27 Nov 2024 ([Spotify's announcement](https://developer.spotify.com/blog/2024-11-27-changes-to-the-web-api)). Without audio features, Spotify can't tell a new app how energetic or acoustic a song is, so it can't be the engine that finds songs. VibeMatch keeps using the Hugging Face copy of those features for ranking. It uses Spotify only to *play* songs: the catalog now has each song's `track_id`, which gives a link (`open.spotify.com/track/<id>`) and an optional embedded player. No Spotify account, key, or login is needed. I didn't check Spotify's current development-mode or quota rules. They would matter only for a later step that imports your real listening history.
+
+### Privacy in 2.1
+
+| Data | Sent to Claude | Sent to the music source | Written to the log |
+|---|---|---|---|
+| Prompt text | Yes, to read it and to pick songs (never if it mentions a crisis) | No | Length only |
+| What the prompt was read as | Yes | No | Which fields it filled |
+| Listening history (plays, times, places) | No | No | No |
+| History summary ("23 similar past plays, usually darker") | Yes | No | Play count and strength only |
+| Which of the 8 candidates you've played before | Yes (song IDs) | No | No |
+| Re-ranking by history and genres | No (done on the device) | No | The re-ranked candidates |
+| Spotify players | No | No | No. The toggle is off by default; when on, your browser loads Spotify's player, so Spotify sees which songs are shown |
+
+Everything in the 2.0 table still applies.
+
+### Run it
+
+The setup is the same as 2.0 (`streamlit run app.py`). To regenerate the demo histories, run `python -m scripts.make_demo_history`. `python -m pytest` runs 127 tests with no network: Claude, the prompt reader, and the weather are faked or turned off.
+
+### Limitations of 2.1
+
+- **The histories are synthetic.** The tests show VibeMatch finds the patterns we planted, which says nothing about real listeners.
+- **The 40% cap, the `n + 20` curve, and the re-rank amounts are my defaults, not research.**
+- **Weather and time can be counted twice.** The manual's weather and time-of-day nudges still apply on top of history that already reflects them. A possible fix is to skip M-08/M-09 when history has enough similar plays.
+- **With no mood card, even a few similar plays set the starting point.** For example, the gym-goer has 3 on rainy nights.
+- **Keyword reading is shallow.** It catches common phrases and simple negations ("no country", "nothing too sad"). It misses most other phrasing, and "chill" is read as a mood, not the genre.
+- **Claude reading the prompt hasn't been run live.** It's tested with a fake client only, as with AI mode in 2.0.
+- **The app doesn't learn from new plays or skips yet.** History is read-only.
+
+---
+
 ## Reflection
 
 ✏️ *Draft. Rewrite in your own words.*
 
 Building 2.0 changed what I think the hard part of an AI system is. Getting Claude to pick songs took one prompt. Making the system trustworthy took everything around that prompt: deciding what Claude is allowed to see, checking that it only uses what it was given, having an answer ready when it fails, and writing down where each rule came from. The most useful habit was turning every claim into a check. If the README says the raw heart rate never reaches the log, a test should fail when it does.
 
-My responsible-AI reflection (limitations, misuse, testing surprises, and how I worked with AI) is in [section 11 of the model card](model_card.md#11-reflection-and-ethics-vibematch-20).
+My responsible-AI reflection (limitations, misuse, testing surprises, and how I worked with AI) is in [section 12 of the model card](model_card.md#12-reflection-and-ethics-vibematch-20-and-21).
 
 ---
 

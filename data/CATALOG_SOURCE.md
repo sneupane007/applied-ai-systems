@@ -20,7 +20,7 @@
 
 ## Columns
 
-The columns match `data/songs.csv` (`id, title, artist, genre, mood, energy, tempo_bpm, valence, danceability, acousticness`), plus `instrumentalness`.
+The columns match `data/songs.csv` (`id, title, artist, genre, mood, energy, tempo_bpm, valence, danceability, acousticness`), plus `instrumentalness` and `track_id` (the song's Spotify track ID, used for "Open in Spotify" links and embedded players; added in 2.1 without changing any other value).
 
 ## Known limitations
 

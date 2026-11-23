@@ -11,11 +11,12 @@ from src.retrieval import LocalCatalog
 from src.vibe import Result, default_reasoner, recommend_for_moment, setup_logging
 
 SCENARIOS = {
-    "Rainy night at home": Moment("rainy_window", "Low", "match", "home", hour=23, weather="rainy",
-                                  note="nothing too sad, just cozy"),
-    "Storm at the gym": Moment("storm", "Wired", "energize", "gym", hour=18, weather="sunny"),
-    "Heart rate up on a cloudy afternoon": Moment("cozy_blanket", "Okay", "match", "home", hour=15,
-                                                  weather="cloudy", heart_rate=110),
+    "Rainy night at home": Moment(hour=23, mood_card="rainy_window", energy_level="Low", goal="match",
+                                  place="home", weather="rainy", note="nothing too sad, just cozy"),
+    "Storm at the gym": Moment(hour=18, mood_card="storm", energy_level="Wired", goal="energize", place="gym",
+                               weather="sunny"),
+    "Heart rate up on a cloudy afternoon": Moment(hour=15, mood_card="cozy_blanket", energy_level="Okay",
+                                                  goal="match", place="home", weather="cloudy", heart_rate=110),
 }
 
 

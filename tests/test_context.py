@@ -67,3 +67,16 @@ def test_validate_rejects_bad_input(change):
 
 def test_validate_accepts_good_input():
     validate(moment(weather="sunny", heart_rate=72, notifications=3, sleep_hours=7.5, note="cozy please"))
+
+
+def test_without_a_card_the_start_is_history_then_neutral():
+    usual = {"energy": 0.2, "valence": 0.3, "acousticness": 0.9}
+    assert base_point(Moment(hour=9), usual) == usual
+    assert base_point(Moment(hour=9, energy_level="Wired"), usual)["energy"] == 0.55
+    assert base_point(Moment(hour=9)) == {"energy": 0.5, "valence": 0.5, "acousticness": 0.5}
+
+
+def test_auto_fields_are_valid_and_add_no_labels():
+    m = Moment(hour=9, goal="match")
+    validate(m)
+    assert labels_for(m) == ["goal_match", "morning"]

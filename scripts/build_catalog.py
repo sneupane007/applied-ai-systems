@@ -71,6 +71,7 @@ def main() -> None:
         "danceability": catalog["danceability"].round(3),
         "acousticness": catalog["acousticness"].round(3),
         "instrumentalness": catalog["instrumentalness"].round(3),
+        "track_id": catalog["track_id"],
     })
     out.to_csv(OUT_PATH, index=False)
 
