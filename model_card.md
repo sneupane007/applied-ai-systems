@@ -301,7 +301,7 @@ Sections 1–9 describe VibeMatch 1.0. This section covers 2.0, which runs in `a
 - Most figures were taken from abstracts and summaries, not full papers.
 
 **Evaluation.**
-- 92 automated tests, with no network. They cover rule parsing and matching, the worked example (target energy 0.075, valence 0.25, acoustic 0.80), privacy allow-lists, retrieval, the weather code mapping and failures, the grounding check (unknown song and rule IDs rejected, fewer than 3 valid picks falls back), and the full pipeline for rainy night, gym, focus, high resting heart rate, and crisis notes.
+- 93 automated tests, with no network. They cover rule parsing and matching, the worked example (target energy 0.075, valence 0.25, acoustic 0.80), privacy allow-lists, retrieval, the weather code mapping and failures, the grounding check (unknown song and rule IDs rejected, fewer than 3 valid picks falls back), and the full pipeline for rainy night, gym, focus, high resting heart rate, and crisis notes.
 - The tests also check that the logs never contain raw signals or note text, and that the Streamlit page works in a headless run.
 - One live Open-Meteo call (Boston) matched the code's expectations.
 - **AI mode has not been run against the real Claude API yet.** It's tested with a fake client only.
@@ -320,3 +320,66 @@ Sections 1–9 describe VibeMatch 1.0. This section covers 2.0, which runs in `a
 - Claude sees coarse labels, your choices, and your note.
 - The music source sees only the target sound.
 - If a note mentions self-harm or a crisis, the app shows support resources (988 in the US), uses offline picks, and doesn't send the note anywhere.
+
+---
+
+## 11. Reflection and Ethics (VibeMatch 2.0)
+
+Sections 1–9 reflect on 1.0. This section answers the final-project questions for 2.0. The facts and figures were checked against the code, the tests, and `python -m src.demo`. Parts marked ✏️ are drafts for me to confirm and rewrite in my own words.
+
+### 11.1 Limitations and biases
+
+- **AI mode hasn't been tested against the real API.** Every Claude path is tested with a fake client, so whether `claude-haiku-5-5` picks well and cites the right rules is unknown.
+- **The grounding check verifies IDs, not words.** It guarantees that every song and rule Claude names was in its input. A reason sentence could still describe a song wrongly (for example, call a song acoustic when it isn't), and the check wouldn't catch it.
+- **Fewer than 5 songs can come back.** The check accepts 3 or more valid picks. When a simulated AI answer named one song that wasn't retrieved, the listener got 4 songs, not 5.
+- **The crisis check is a keyword list.** It has 11 English phrases, so it misses paraphrases and other languages, and quoting a lyric could set it off. It correctly ignores "die hard fan of jazz", but no list catches everything.
+- **The catalog has gaps and leans mainstream.** It has 152 songs, all with popularity ≥ 50, so less-known artists are left out. Only 4 songs have energy ≥ 0.9, so a maximum-energy workout tops out at 0.91. The features are Spotify's model estimates, and some genre labels are odd.
+- **The manual's defaults won't fit everyone.** The nudge sizes are hand-set. "Rain means mellow" and "night means quieter" come from small effects that differ from person to person, and some people want the opposite.
+- **Signals show arousal, not feeling.** A high heart rate says someone is worked up, not whether they're excited or anxious, so the system relies on the mood card the listener picks.
+
+See also "Biases and risks" in section 10.
+
+### 11.2 Could VibeMatch be misused, and how would I prevent it?
+
+| Misuse | What already prevents it | What I'd add before real users |
+|---|---|---|
+| Using inferred mood to target people when they're low (ads, "keep listening" nudges) | Raw signals never leave the device, and Claude sees only coarse labels. There's no engagement goal, only the goal the listener picks. Every label and rule is shown on the page. | A written promise that labels are never stored, sold, or used for ads, and a "delete my data" control |
+| Treating VibeMatch as a mental-health tool | The crisis check shows 988 and findahelpline.com and skips the AI for those notes. Every page says it is not therapy. | A better crisis classifier, with the keyword list kept as a backstop, reviewed by someone with clinical expertise |
+| Prompt injection through the note ("ignore your rules…") | The system prompt treats the note as a preference, not an instruction. Output is structured JSON, every song and rule ID must come from the input (README guardrail row 6), and reasons are capped at 300 characters. | Check reason text against the song's features, and filter unsafe text before it is shown |
+| Building a profile of someone from the logs | Logs hold categories and the note's length only, never raw signals, the city, or note text (tested). `logs/` is gitignored. | A retention limit and log rotation |
+| Running up API costs with a leaked key | The key lives in `.env`, which is gitignored. Each request has a 20 s timeout and at most 2 retries. | Per-user rate limits and a spending cap, if it were ever deployed |
+
+### 11.3 What surprised me while testing reliability
+
+✏️ *Draft candidates. Keep the ones that match what you noticed, and rewrite them in your own words.*
+
+- **Retrieval did exactly what I asked, and that was wrong for the person.** For a low mood on a rainy night, 4 of the 5 songs nearest to the target were very sad (valence under 0.25). Without the M-05 rule in code, a listener who wrote "nothing too sad" would have got mostly very sad songs.
+- **Fixing one scenario broke another.** A bigger flat penalty fixed the focus scenario but let louder songs into the calm one. Only a penalty that grows with distance fixed both (section 10, "What tuning showed").
+- **A guardrail changed the size of the answer.** When a simulated AI answer made up one song ID, the check dropped it correctly, but the listener then saw 4 songs instead of 5.
+- **The hardest crisis test was the false positive.** Making sure "die hard fan of jazz" does *not* trigger the support message mattered as much as catching "I want to die".
+
+### 11.4 Collaboration with AI
+
+✏️ *Draft. Check every line against what you remember, fill in the blanks, keep one example of each kind, and rewrite in your own words.*
+
+**How I used AI.** I built VibeMatch 2.0 with Claude Code (Claude Opus 5.5) as a pair programmer, and every 2.0 commit has a `Co-Authored-By: Claude Opus 5.5` line. I used it to write the modules, their tests, and the docs [and to plan the architecture and research the evidence for the manual? confirm]. I checked its work by running the tests and the demo and by comparing what the docs claimed with real output. For 1.0, I used an AI assistant to research recommenders, add songs, and write the scoring code (section 9).
+
+**A suggestion I accepted** (keep one):
+- Claude suggested adding a `python -m src.demo` command so every sample in the README comes from a command anyone can rerun, instead of being typed up by hand from the page. I took it because a reviewer can check all the samples with one command. *(This happened while finishing the project.)*
+- [The grounding check: drop any song or rule ID Claude wasn't given, and fall back to offline picks when fewer than 3 survive. Why I accepted it: ___]
+- [The privacy allow-lists, which raise an error for any field that isn't on the list. Why I accepted them: ___]
+
+**A suggestion I rejected or revised** (keep one):
+- For the final polish, Claude also offered a bigger option: run AI mode against the live API and add a reliability script that counts rejections and fallbacks over many runs. I didn't take it, because ___. *(This happened while finishing the project.)*
+- Claude offered to create the new GitHub repo and push the code for me. I chose to do it myself, because ___. *(This happened while finishing the project.)*
+- The first retrieval design gave songs outside a preferred range a flat 0.15 penalty. Testing showed it starved the focus scenario of instrumental songs, and a bigger flat penalty broke the calm scenario, so it was revised to a penalty that grows with distance (section 10). [Confirm whether this was Claude's suggestion and who caught the problem.]
+- In 1.0, the AI wrote a profile comparison that didn't match the real output. It was caught by checking every claim against a fresh run (section 9).
+
+### 11.5 Future improvements
+
+1. **Run AI mode live and rate the picks.** Run the three demo moments and the guardrail cases against the real API, then have a few people rate the picks in a table: does each song fit the moment, and would they skip any?
+2. **Check Claude's reasons, not just its IDs.** Reject a reason that contradicts the song's features, such as "acoustic" for a song with acousticness under 0.5.
+3. **Top up to 5 songs** from the retrieved candidates when the grounding check drops some.
+4. **Replace the crisis keyword list** with a classifier that handles paraphrases and other languages, and keep the list as a backstop.
+5. **Learn the nudges for each listener** from likes and skips, instead of one default for everyone.
+6. **Use real signals and a bigger catalog** through the existing interfaces: phone signals read on the device, and a Spotify `MusicSource`.
