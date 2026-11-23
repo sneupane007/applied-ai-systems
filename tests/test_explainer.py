@@ -20,7 +20,8 @@ LABELS = ["goal_match", "home", "low_mood", "night", "rain"]
 RULES = match_rules(load_manual(), LABELS)
 TARGET = {"energy": 0.1, "valence": 0.25, "acousticness": 0.8}
 LISTENER = {"mood": "Rainy window", "energy_level": "Low", "goal": "Match my mood", "place": "Home",
-            "time_of_day": "night", "weather": "rainy", "labels": LABELS, "note": "just cozy"}
+            "time_of_day": "night", "weather": "rainy", "labels": LABELS, "note": "just cozy",
+            "history": "none", "played_before": []}
 
 
 def song(id, energy, valence, artist=None):
