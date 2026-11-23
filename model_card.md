@@ -320,3 +320,42 @@ Sections 1–9 describe VibeMatch 1.0. This section covers 2.0, which runs in `a
 - Claude sees coarse labels, your choices, and your note.
 - The music source sees only the target sound.
 - If a note mentions self-harm or a crisis, the app shows support resources (988 in the US), uses offline picks, and doesn't send the note anywhere.
+
+## 11. VibeMatch 2.1 (prompt + listening history)
+
+**What changed.**
+- The typed prompt is now the main input. It's read into the page's own choices (mood card, energy, goal, place, weather) plus "no lyrics", "nothing too sad", and genres to like or avoid. Claude reads it, with keyword matching as the fallback.
+- A listening history (song, time, weather, place, finished or skipped) pulls the starting point toward what this listener usually plays in a similar moment, by at most 40%.
+- Retrieved songs are re-ranked on the device: familiar songs move up, songs this listener usually skips move down, and named genres move up or down.
+- Each pick links to Spotify through the `track_id` now kept in the catalog.
+
+**Data.** The three listening histories (student, gym-goer, night owl; 925 plays over six weeks) are synthetic. They come from planted habits, seed 42 ([HISTORY_SOURCE.md](data/HISTORY_SOURCE.md)). The catalog is unchanged apart from the new `track_id` column. A diff confirmed the 152 songs and every other value are identical.
+
+**Evaluation.**
+- 127 automated tests, with no network.
+- The new tests check:
+  - The history recovers the planted patterns: student rainy nights at energy < 0.3 and acoustic > 0.7, more acoustic than sunny nights; gym evenings at energy > 0.7.
+  - History strength is 0 with no similar plays and grows with more of them, but stays under 40%.
+  - The re-rank bonus and penalties work.
+  - The same prompt and moment give each persona different picks.
+  - The keyword reader handles negation ("nothing too sad" isn't a sad mood; "no country" avoids country).
+  - Claude's reading is limited to known values and falls back to keywords on any error.
+  - Your own settings win over the prompt.
+  - Crisis prompts never reach either reader's AI path.
+  - Logs hold neither the prompt text nor the play history.
+- **This evaluation is partly circular.** It shows the code finds patterns we put there, not that real listeners have them.
+- Claude reading the prompt has not been run live (fake client only).
+
+**What tuning showed.** At first each play was weighted by its match count (1–3). Plays that shared only the place ("home") then drowned out the weather: the student's rainy nights and sunny nights came out almost the same (acoustic 0.72 vs 0.66). Squaring the weight (1, 4, 9) separated them (acoustic 0.79 vs 0.66, energy 0.26 vs 0.36).
+
+**Biases and risks.**
+- History reinforces habits. A listener who always plays sad songs on rainy afternoons gets more of them, and familiar songs get a bonus. The manual's set rules (at most 2 very sad songs for a low mood or "nothing too sad") still apply. The 40% cap keeps what you say in charge.
+- The manual's weather and time nudges apply on top of history that already reflects them.
+- With no mood card, a handful of loosely similar plays can set the starting point.
+- The keyword reader understands only common English phrases.
+
+**Privacy.**
+- The history never leaves the device.
+- Claude sees a one-line summary ("23 similar past plays, usually darker") and which of the 8 candidates were played before.
+- The music source still sees only the target sound, because re-ranking happens locally.
+- Spotify players are off by default. When they're on, the browser loads Spotify's player, so Spotify sees which songs are shown.
