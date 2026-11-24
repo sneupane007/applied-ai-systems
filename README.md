@@ -1,8 +1,10 @@
-# 🎧 VibeMatch 2.0: Context-Aware Music Recommender with RAG
+# 🎧 VibeMatch 2.1: Context-Aware Music Recommender with RAG
 
-VibeMatch recommends real songs for the moment you're in, not just for your taste in general. You say how you feel and what you want from the music. VibeMatch adds the weather, the time of day, and simulated phone signals. It then looks up what a research-based manual says about music for that kind of moment, retrieves the closest songs from a 152-song catalog, and has Claude pick and explain five of them. A check makes sure Claude used only what it was given. This matters because mood-aware recommendations run on sensitive data. VibeMatch shows its reasoning, keeps raw signals on the device, and keeps working when the AI doesn't.
+VibeMatch recommends real songs for the moment you're in, not just for your taste in general. You type how you feel and what you want from the music (or pick it on the page), and a listening history can pull the picks toward what you usually play. VibeMatch adds the weather, the time of day, and simulated phone signals. It then looks up what a research-based manual says about music for that kind of moment, retrieves the closest songs from a 152-song catalog, and has Claude pick and explain five of them. A check makes sure Claude used only what it was given. This matters because mood-aware recommendations run on sensitive data. VibeMatch shows its reasoning, keeps raw signals on the device, and keeps working when the AI doesn't.
 
 **Quick start:** `pip install -r requirements.txt`, then `python -m src.demo` (terminal) or `streamlit run app.py` (web page). Full steps are in [Setup and run](#setup-and-run).
+
+**Versions:** [1.0](#base-project-music-recommender-simulation-module-3) is the Module 3 base project. [2.0](#what-vibematch-20-does) added the research-based manual, retrieval, Claude, and the guardrails. [2.1](#vibematch-21-your-prompt-and-your-listening-history) added the typed prompt and the listening history.
 
 ---
 
@@ -336,7 +338,7 @@ run=342f78d0 check: Swapped 2 very sad song(s) for warmer ones (M-05).
 | 1.0 recommender (`test_recommender.py`) | 2 | 1.0 scoring still works |
 
 - **What worked:** every row in the guardrail table behaved as designed, the sample outputs above reproduce exactly, and the log never contained raw signal values or note text.
-- **Live AI mode:** the log holds 5 runs of the Streamlit page with a real API key (1 on the 2.0 code, 4 on 2.1). All 5 returned 5 picks, every pick was one of the 8 retrieved songs, and no song or rule ID was rejected. Claude didn't just take the nearest songs: in 4 of the 5 runs it chose the 7th or 8th candidate. In 1 run the code reordered its set so energy steps up (M-10). Each call took 3.1–11.0 s. In the 4 runs on 2.1, Claude also read the prompt, but those prompts were 3–13 characters and filled none of the settings.
+- **Live AI mode:** the log holds 5 runs of the Streamlit page with a real API key (1 on the 2.0 code, 4 on 2.1). All 5 returned 5 picks, every pick was one of the 8 retrieved songs, and no song or rule ID was rejected. Claude didn't just take the nearest songs: in 4 of the 5 runs it chose the 7th or 8th candidate. In 1 run the code reordered its set so energy steps up (M-10). Each call took 3.1–11.0 s. In the 4 runs on 2.1, Claude also read the prompt, but those prompts were 3–13 characters and filled none of the settings. Every run is in [assets/live_runs.md](assets/live_runs.md).
 - **What didn't, at first:** songs outside a rule's preferred range originally lost a flat 0.15. That left only 1 instrumental song among the 8 focus candidates, so Claude couldn't follow the "avoid lyrics" rule. A bigger flat penalty fixed focus but let louder songs into the calm set. A penalty that grows with how far outside the range a song falls fixed both: 4 of 8 focus candidates are instrumental, and the calm set stays at energy 0.24–0.38.
 - **What's still unverified:** whether people actually like the picks (there's been no human rating study), whether Claude's reasons describe each song correctly (the check verifies IDs, not words, and reasons aren't logged), how well Claude reads real prompts, and how often the crisis keyword list misses a paraphrase.
 - **What I learned:** retrieval alone isn't enough. For a low mood, the songs nearest to a sad target are mostly very sad (4 of 5 in sample 1), so the manual's set rules have to run in code, after retrieval and after Claude.
@@ -434,8 +436,6 @@ The setup is the same as 2.0 (`streamlit run app.py`). To regenerate the demo hi
 ---
 
 ## Reflection
-
-✏️ *Draft. Rewrite in your own words.*
 
 Building 2.0 changed what I think the hard part of an AI system is. Getting Claude to pick songs took one prompt. Making the system trustworthy took everything around that prompt: deciding what Claude is allowed to see, checking that it only uses what it was given, having an answer ready when it fails, and writing down where each rule came from. The most useful habit was turning every claim into a check. If the README says the raw heart rate never reaches the log, a test should fail when it does.
 
@@ -579,8 +579,6 @@ Top recommendations:
    Because: energy closeness (+0.95), acoustic fit (+0.5)
 ```
 
-**Screenshot or video** *(optional)*: <!-- Insert a screenshot or demo video link here -->
-
 ### Experiments You Tried
 
 - **Weight shift (genre 2.0 → 1.0, energy max 1.0 → 2.0):** The pop fan's list improved: *Rooftop Lights* (happy) moved above *Gym Hero* (intense). The "Sad but Hyped" list got worse, because the only sad song dropped out of the top 5. The other three profiles kept the same order. I put the original weights back afterward.
@@ -601,12 +599,8 @@ More detail is in section 6 of the [model card](model_card.md).
 
 ### Reflection
 
-Read and complete `model_card.md`:
-
-[**Model Card**](model_card.md)
-
-✏️ *Draft. Rewrite in your own words.*
-
 A recommender doesn't "know" music. It turns each song into a few labels and numbers, compares them to labels and numbers describing the user, and adds up points. Ranking is just sorting those totals. What makes it feel smart is the explanation: seeing "genre match (+2.0), mood match (+1.0)" makes a simple sum look like a judgment. Real platforms do the same basic thing at a much bigger scale, adding signals like skips, replays, and what other users with similar taste listen to.
 
 Bias comes in through choices that look harmless. One weight (+2.0 for genre) meant a listener who asked for sad music got a euphoric song first. A catalog where most genres have one song means fans of those genres get worse lists than lofi or pop fans. Exact label matching means anyone whose taste falls between categories, like "indie pop", gets less credit. In a real app, the same kinds of choices could decide which artists get heard and which get buried.
+
+More is in section 9 of the [model card](model_card.md).

@@ -233,7 +233,7 @@ Top recommendations:
 - For "Sad but Hyped", the only sad song came last in the top 5, behind three songs that aren't sad at all.
 - Three songs (*Sunrise City*, *Gym Hero*, *Storm Runner*) each appeared in 3 of the 5 lists.
 
-✏️ *Draft. Rewrite in your own words.* For the Chill Lofi profile the results feel right: two chill lofi tracks, then a focused lofi track, then ambient and jazz. That's what I'd want for studying. The High-Energy Pop list feels a little off, because *Gym Hero* at #2 is a workout song, not a happy one.
+For the Chill Lofi profile the results feel right: two chill lofi tracks, then a focused lofi track, then ambient and jazz. That's what I'd want for studying. The High-Energy Pop list feels a little off, because *Gym Hero* at #2 is a workout song, not a happy one.
 
 ### Experiment: weight shift (genre halved, energy doubled)
 
@@ -258,8 +258,6 @@ Making energy stronger fixed the *Gym Hero* problem for the pop fan, but it hurt
 ---
 
 ## 9. Personal Reflection  
-
-✏️ *Draft. Rewrite in your own words.*
 
 **Biggest learning moment:** Seeing "Sad but Hyped" get a euphoric song at #1. I chose the weights thinking genre was the strongest signal, but I hadn't thought about what happens when a user's genre exists and their mood doesn't. One number (+2.0) decided what that user heard.
 
@@ -364,11 +362,11 @@ Sections 1–9 describe VibeMatch 1.0. This section covers 2.0, which runs in `a
 
 ## 12. Reflection and Ethics (VibeMatch 2.0 and 2.1)
 
-Sections 1–9 reflect on 1.0. This section answers the final-project questions for 2.0 and 2.1. The facts and figures were checked against the code, the tests, `python -m src.demo`, and the live runs in `logs/vibematch.log`. Parts marked ✏️ are for me to confirm in my own words.
+Sections 1–9 reflect on 1.0. This section answers the final-project questions for 2.0 and 2.1. The facts and figures were checked against the code, the tests, `python -m src.demo`, and the live runs in `logs/vibematch.log`.
 
 ### 12.1 Limitations and biases
 
-- **AI mode has only 5 live runs, and nobody has rated them.** The log holds 5 runs of the Streamlit page with a real key (1 on 2.0, 4 on 2.1). Each returned 5 picks from the 8 retrieved songs and cited only matched rules, but nobody has judged whether the picks fit the moment. The reasons Claude writes aren't logged or checked.
+- **AI mode has only 5 live runs, and nobody has rated them.** The log holds 5 runs of the Streamlit page with a real key (1 on 2.0, 4 on 2.1). Each returned 5 picks from the 8 retrieved songs and cited only matched rules, but nobody has judged whether the picks fit the moment. The reasons Claude writes aren't logged or checked. Every run is in [assets/live_runs.md](assets/live_runs.md).
 - **The grounding check verifies IDs, not words.** It guarantees that every song and rule Claude names was in its input. A reason sentence could still describe a song wrongly (for example, call a song acoustic when it isn't), and the check wouldn't catch it.
 - **Fewer than 5 songs can come back.** The check accepts 3 or more valid picks. When a simulated AI answer named one song that wasn't retrieved, the listener got 4 songs, not 5.
 - **The crisis check is a keyword list.** It has 11 English phrases, so it misses paraphrases and other languages, and quoting a lyric could set it off. It correctly ignores "die hard fan of jazz", but no list catches everything.
@@ -390,8 +388,6 @@ See also "Biases and risks" in sections 10 (2.0) and 11 (2.1).
 
 ### 12.3 What surprised me while testing reliability
 
-✏️ *Check these match what surprised you, then delete this line.*
-
 - **Retrieval did exactly what I asked, and that was wrong for the person.** For a low mood on a rainy night, 4 of the 5 songs nearest to the target were very sad (valence under 0.25). Without the M-05 rule in code, a listener who wrote "nothing too sad" would have got mostly very sad songs.
 - **Fixing one scenario broke another.** A bigger flat penalty fixed the focus scenario but let louder songs into the calm one. Only a penalty that grows with distance fixed both (section 10, "What tuning showed").
 - **A guardrail changed the size of the answer.** When a simulated AI answer made up one song ID, the check dropped it correctly, but the listener then saw 4 songs instead of 5.
@@ -399,8 +395,6 @@ See also "Biases and risks" in sections 10 (2.0) and 11 (2.1).
 - **Live, Claude didn't just take the closest songs, and the grounding check never fired.** In 4 of 5 live runs it chose the 7th or 8th of the 8 candidates, and it never named a song or rule it wasn't given. The only correction the code made live was to the order: once, it reordered Claude's set so energy steps up (M-10).
 
 ### 12.4 Collaboration with AI
-
-✏️ *Written from my Claude Code session transcripts and the git log. Check it matches your memory and wording, then delete this line.*
 
 **How I used AI.** I built VibeMatch 2.0 and 2.1 with Claude Code (Claude Opus 5.5) as a pair programmer. Every 2.0 and 2.1 commit has a `Co-Authored-By: Claude Opus 5.5` line.
 - **Design.** I pasted the assignment and asked for directions. Claude offered three: a RAG concierge, an agentic playlist builder, and an evaluation-only system. I picked RAG and then pushed the idea further myself: mood picture cards, weather, place, and time; a "personal AI engine" that knows my data while the music platform doesn't; and a manual the AI reviews before every pick. Before approving the plan, I reviewed it in Lavish over three rounds.
