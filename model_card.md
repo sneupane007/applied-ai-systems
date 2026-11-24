@@ -233,7 +233,7 @@ Top recommendations:
 - For "Sad but Hyped", the only sad song came last in the top 5, behind three songs that aren't sad at all.
 - Three songs (*Sunrise City*, *Gym Hero*, *Storm Runner*) each appeared in 3 of the 5 lists.
 
-✏️ *Draft. Rewrite in your own words.* For the Chill Lofi profile the results feel right: two chill lofi tracks, then a focused lofi track, then ambient and jazz. That's what I'd want for studying. The High-Energy Pop list feels a little off, because *Gym Hero* at #2 is a workout song, not a happy one.
+For the Chill Lofi profile the results feel right: two chill lofi tracks, then a focused lofi track, then ambient and jazz. That's what I'd want for studying. The High-Energy Pop list feels a little off, because *Gym Hero* at #2 is a workout song, not a happy one.
 
 ### Experiment: weight shift (genre halved, energy doubled)
 
@@ -259,8 +259,6 @@ Making energy stronger fixed the *Gym Hero* problem for the pop fan, but it hurt
 
 ## 9. Personal Reflection  
 
-✏️ *Draft. Rewrite in your own words.*
-
 **Biggest learning moment:** Seeing "Sad but Hyped" get a euphoric song at #1. I chose the weights thinking genre was the strongest signal, but I hadn't thought about what happens when a user's genre exists and their mood doesn't. One number (+2.0) decided what that user heard.
 
 **How AI helped, and when I had to double-check:** The AI assistant helped me research how real platforms recommend music, generate new songs for the CSV, write the scoring code, and come up with edge-case profiles I wouldn't have thought of. I still had to check its work. When it analyzed the starter data, it found that acousticness and energy were almost perfectly linked (−0.99), so the acoustic preference would barely matter until we added songs that broke that pattern. It also wrote one comparison in this model card that didn't match the real output. That was caught only because every claim was checked against a fresh run before committing. The lesson for me: always compare the AI's description of results to the actual results.
@@ -270,3 +268,157 @@ Making energy stronger fixed the *Gym Hero* problem for the pop fan, but it hurt
 **How it changed how I see music apps:** Now when an app keeps suggesting the same kind of song, I wonder which weight is doing it.
 
 **What I'd try next:** Add partial credit for related genres and moods, then add a simple collaborative filter using a few made-up users' likes, to see how the lists change compared to content alone.
+
+---
+
+## 10. VibeMatch 2.0 (context-aware, RAG)
+
+Sections 1–9 describe VibeMatch 1.0. This section covers 2.0, which runs in `app.py`; the 1.0 command-line app is unchanged.
+
+**Intended use.** A class project that shows how an AI can recommend music for the moment you're in, while keeping personal data on your device. It's for exploring and learning, not for real listeners' wellbeing. It is **not therapy or medical advice**, and its phone signals are simulated.
+
+**How it works.**
+1. Your moment (mood card, energy level, goal, place, weather, time of day, simulated heart rate, notifications, and sleep) becomes coarse labels and a starting point.
+2. Rules from the [music & mood manual](knowledge/music_mood_manual.md) that match those labels nudge the point by at most ±0.25 per axis.
+3. The 8 closest of 152 real songs are retrieved.
+4. Claude (`claude-haiku-5-5`) picks and orders 5 of them, citing rule IDs.
+5. A check keeps only retrieved songs and matched rules, caps very sad songs at 2 for a low mood, and orders the set along the goal.
+6. If anything fails, template reasons are used instead.
+
+**Data.** 152 songs from the Spotify Tracks Dataset on Hugging Face: 18 genres, popularity ≥ 50, 38 songs per valence/energy quadrant, seed 42. See [CATALOG_SOURCE.md](data/CATALOG_SOURCE.md). The features (energy, valence, acousticness, instrumentalness) are Spotify's model estimates.
+
+**The manual and its evidence.** 12 rules, each labeled `strong`, `moderate`, `limited`, or `design rule`, with sources.
+- Strong: music lowers stress (de Witte et al. 2020).
+- Moderate:
+  - sleep music at 60–80 bpm
+  - lyrics hurting focus (Vasilev et al. 2018)
+  - 120–140 bpm for workouts
+  - short sleep lowering mood (Palmer et al. 2024)
+  - time-of-day and weather effects that are small and personal (Golder & Macy 2011; Denissen et al. 2008; Klimstra et al. 2011)
+- Limited: how to handle low mood (Garrido & Schubert 2013) and tension (Sharman & Dingle 2015).
+- Most figures were taken from abstracts and summaries, not full papers.
+
+**Evaluation.**
+- 93 automated tests at the time (128 after 2.1), with no network. They cover rule parsing and matching, the worked example (target energy 0.075, valence 0.25, acoustic 0.80), privacy allow-lists, retrieval, the weather code mapping and failures, the grounding check (unknown song and rule IDs rejected, fewer than 3 valid picks falls back), and the full pipeline for rainy night, gym, focus, high resting heart rate, and crisis notes.
+- The tests also check that the logs never contain raw signals or note text, and that the Streamlit page works in a headless run.
+- One live Open-Meteo call (Boston) matched the code's expectations.
+- **When 2.0 was written, AI mode had not been run against the real Claude API.** Section 12.1 reports the live runs since.
+
+**What tuning showed.** At first, songs outside a preferred range lost a flat 0.15. In the focus scenario that left only 1 instrumental song among the 8 candidates, so Claude couldn't follow the "avoid lyrics" rule. Raising the flat penalty fixed focus but broke calming: songs with energy up to 0.56 got in just because their tempo was in range. A penalty that grows with *how far* outside the range a song falls fixed both. Focus got 4 of 8 instrumental, and the calm set stayed at energy 0.24–0.38.
+
+**Biases and risks.**
+- "Rain means mellow" and similar nudges are defaults that won't fit everyone. Some people feel better in the rain.
+- Popularity ≥ 50 favors mainstream artists.
+- Some genre labels in the dataset are odd.
+- Sensed signals mostly show *how worked-up* someone is, not whether they feel good or bad, so the system relies on what you say.
+- Emotion inference is error-prone in general (EU AI Act, Recital 44). The page shows every label and rule it used so you can see and override them.
+
+**Privacy.**
+- Raw signals, the city, and the exact hour never reach Claude or the music source.
+- Claude sees coarse labels, your choices, and your note.
+- The music source sees only the target sound.
+- If a note mentions self-harm or a crisis, the app shows support resources (988 in the US), uses offline picks, and doesn't send the note anywhere.
+
+## 11. VibeMatch 2.1 (prompt + listening history)
+
+**What changed.**
+- The typed prompt is now the main input. It's read into the page's own choices (mood card, energy, goal, place, weather) plus "no lyrics", "nothing too sad", and genres to like or avoid. Claude reads it, with keyword matching as the fallback.
+- A listening history (song, time, weather, place, finished or skipped) pulls the starting point toward what this listener usually plays in a similar moment, by at most 40%.
+- Retrieved songs are re-ranked on the device: familiar songs move up, songs this listener usually skips move down, and named genres move up or down.
+- Each pick links to Spotify through the `track_id` now kept in the catalog.
+
+**Data.** The three listening histories (student, gym-goer, night owl; 925 plays over six weeks) are synthetic. They come from planted habits, seed 42 ([HISTORY_SOURCE.md](data/HISTORY_SOURCE.md)). The catalog is unchanged apart from the new `track_id` column. A diff confirmed the 152 songs and every other value are identical.
+
+**Evaluation.**
+- 128 automated tests in total, with no network.
+- The new tests check:
+  - The history recovers the planted patterns: student rainy nights at energy < 0.3 and acoustic > 0.7, more acoustic than sunny nights; gym evenings at energy > 0.7.
+  - History strength is 0 with no similar plays and grows with more of them, but stays under 40%.
+  - The re-rank bonus and penalties work.
+  - The same prompt and moment give each persona different picks.
+  - The keyword reader handles negation ("nothing too sad" isn't a sad mood; "no country" avoids country).
+  - Claude's reading is limited to known values and falls back to keywords on any error.
+  - Your own settings win over the prompt.
+  - Crisis prompts never reach either reader's AI path.
+  - Logs hold neither the prompt text nor the play history.
+- **This evaluation is partly circular.** It shows the code finds patterns we put there, not that real listeners have them.
+- Claude reading the prompt has had 4 live runs, but those prompts were 3–13 characters and filled none of the settings, so it is still effectively untested live.
+
+**What tuning showed.** At first each play was weighted by its match count (1–3). Plays that shared only the place ("home") then drowned out the weather: the student's rainy nights and sunny nights came out almost the same (acoustic 0.72 vs 0.66). Squaring the weight (1, 4, 9) separated them (acoustic 0.79 vs 0.66, energy 0.26 vs 0.36).
+
+**Biases and risks.**
+- History reinforces habits. A listener who always plays sad songs on rainy afternoons gets more of them, and familiar songs get a bonus. The manual's set rules (at most 2 very sad songs for a low mood or "nothing too sad") still apply. The 40% cap keeps what you say in charge.
+- The manual's weather and time nudges apply on top of history that already reflects them.
+- With no mood card, a handful of loosely similar plays can set the starting point.
+- The keyword reader understands only common English phrases.
+
+**Privacy.**
+- The history never leaves the device.
+- Claude sees a one-line summary ("23 similar past plays, usually darker") and which of the 8 candidates were played before.
+- The music source still sees only the target sound, because re-ranking happens locally.
+- Spotify players are off by default. When they're on, the browser loads Spotify's player, so Spotify sees which songs are shown.
+
+---
+
+## 12. Reflection and Ethics (VibeMatch 2.0 and 2.1)
+
+Sections 1–9 reflect on 1.0. This section answers the final-project questions for 2.0 and 2.1. The facts and figures were checked against the code, the tests, `python -m src.demo`, and the live runs in `logs/vibematch.log`.
+
+### 12.1 Limitations and biases
+
+- **AI mode has only 5 live runs, and nobody has rated them.** The log holds 5 runs of the Streamlit page with a real key (1 on 2.0, 4 on 2.1). Each returned 5 picks from the 8 retrieved songs and cited only matched rules, but nobody has judged whether the picks fit the moment. The reasons Claude writes aren't logged or checked. Every run is in [assets/live_runs.md](assets/live_runs.md).
+- **The grounding check verifies IDs, not words.** It guarantees that every song and rule Claude names was in its input. A reason sentence could still describe a song wrongly (for example, call a song acoustic when it isn't), and the check wouldn't catch it.
+- **Fewer than 5 songs can come back.** The check accepts 3 or more valid picks. When a simulated AI answer named one song that wasn't retrieved, the listener got 4 songs, not 5.
+- **The crisis check is a keyword list.** It has 11 English phrases, so it misses paraphrases and other languages, and quoting a lyric could set it off. It correctly ignores "die hard fan of jazz", but no list catches everything.
+- **The catalog has gaps and leans mainstream.** It has 152 songs, all with popularity ≥ 50, so less-known artists are left out. Only 4 songs have energy ≥ 0.9, so a maximum-energy workout tops out at 0.91. The features are Spotify's model estimates, and some genre labels are odd.
+- **The manual's defaults won't fit everyone.** The nudge sizes are hand-set. "Rain means mellow" and "night means quieter" come from small effects that differ from person to person, and some people want the opposite.
+- **Signals show arousal, not feeling.** A high heart rate says someone is worked up, not whether they're excited or anxious, so the system relies on the mood card the listener picks.
+
+See also "Biases and risks" in sections 10 (2.0) and 11 (2.1).
+
+### 12.2 Could VibeMatch be misused, and how would I prevent it?
+
+| Misuse | What already prevents it | What I'd add before real users |
+|---|---|---|
+| Using inferred mood to target people when they're low (ads, "keep listening" nudges) | Raw signals never leave the device, and Claude sees only coarse labels. There's no engagement goal, only the goal the listener picks. Every label and rule is shown on the page. | A written promise that labels are never stored, sold, or used for ads, and a "delete my data" control |
+| Treating VibeMatch as a mental-health tool | The crisis check shows 988 and findahelpline.com and skips the AI for those notes. Every page says it is not therapy. | A better crisis classifier, with the keyword list kept as a backstop, reviewed by someone with clinical expertise |
+| Prompt injection through the note ("ignore your rules…") | The system prompt treats the note as a preference, not an instruction. Output is structured JSON, every song and rule ID must come from the input (README guardrail row 6), and reasons are capped at 300 characters. | Check reason text against the song's features, and filter unsafe text before it is shown |
+| Building a profile of someone from the logs | Logs hold categories and the note's length only, never raw signals, the city, or note text (tested). `logs/` is gitignored. | A retention limit and log rotation |
+| Running up API costs with a leaked key | The key lives in `.env`, which is gitignored. Each request has a 20 s timeout and at most 2 retries. | Per-user rate limits and a spending cap, if it were ever deployed |
+
+### 12.3 What surprised me while testing reliability
+
+- **Retrieval did exactly what I asked, and that was wrong for the person.** For a low mood on a rainy night, 4 of the 5 songs nearest to the target were very sad (valence under 0.25). Without the M-05 rule in code, a listener who wrote "nothing too sad" would have got mostly very sad songs.
+- **Fixing one scenario broke another.** A bigger flat penalty fixed the focus scenario but let louder songs into the calm one. Only a penalty that grows with distance fixed both (section 10, "What tuning showed").
+- **A guardrail changed the size of the answer.** When a simulated AI answer made up one song ID, the check dropped it correctly, but the listener then saw 4 songs instead of 5.
+- **The hardest crisis test was the false positive.** Making sure "die hard fan of jazz" does *not* trigger the support message mattered as much as catching "I want to die".
+- **Live, Claude didn't just take the closest songs, and the grounding check never fired.** In 4 of 5 live runs it chose the 7th or 8th of the 8 candidates, and it never named a song or rule it wasn't given. The only correction the code made live was to the order: once, it reordered Claude's set so energy steps up (M-10).
+
+### 12.4 Collaboration with AI
+
+**How I used AI.** I built VibeMatch 2.0 and 2.1 with Claude Code (Claude Opus 5.5) as a pair programmer. Every 2.0 and 2.1 commit has a `Co-Authored-By: Claude Opus 5.5` line.
+- **Design.** I pasted the assignment and asked for directions. Claude offered three: a RAG concierge, an agentic playlist builder, and an evaluation-only system. I picked RAG and then pushed the idea further myself: mood picture cards, weather, place, and time; a "personal AI engine" that knows my data while the music platform doesn't; and a manual the AI reviews before every pick. Before approving the plan, I reviewed it in Lavish over three rounds.
+- **Research.** I asked Claude to search for what affects emotions and what music helps. That became the manual's 12 rules, each with an evidence level and sources.
+- **Code, tests, and docs.** Claude wrote the modules, their tests, and the docs, and in 2.1 the prompt reader and the listening history.
+- **Checking.** I checked its work by running the tests and the demo, comparing what the docs claimed with real output, and running the page in AI mode.
+
+For 1.0, I used an AI assistant to research recommenders, add songs, and write the scoring code (section 9). I kept it to the assignment: I told it not to do anything the assignment didn't ask for. When it added songs, I asked whether the assignment called for that. It did (Phase 2), and Claude pointed out the one choice that was its own: two songs picked to break the "loud means electronic" pattern.
+
+**Suggestions I accepted**
+- **Enforcing my privacy rule in code.** The rule came from me: "The AI engine will know all my data, but a music streaming platform such as spotify, will not know the exact personal data." Claude turned it into allow-lists in `privacy.py`. Each destination gets a fixed list of fields, and any other field raises an error. I accepted this because it enforces my requirement that personal data stays with the engine, and the tests check it.
+- **Scaling back my first idea.** I first wanted live Spotify data and automatic location. Claude checked and pushed back: Spotify had closed its audio-features endpoints to new apps, and automatic location isn't reliable. It suggested a public dataset of real songs and a typed-in city, and I accepted that smaller scope. The same finding shaped 2.1: VibeMatch links to and embeds Spotify tracks but never calls Spotify's API.
+
+**Suggestions I revised**
+- **How the work was committed.** Claude built all of 2.0 before committing anything. I asked for "one [commit] for each of the dev progress you have made… such that when AI want to make changes in a certain part, it will know which particular commit made a certain error and what to look for." Claude then split the work into 12 commits, each tested on its own, and 2.1 followed the same rule (9 commits).
+- **Reviewing the plan before building.** When Claude first asked me to approve its plan, I turned it down so I could review it in Lavish. My comments there changed the design: they added the personal-engine privacy layer and the research manual.
+
+Claude also corrected itself once. Its first retrieval design gave songs outside a preferred range a flat 0.15 penalty, and its own focus test showed that this left only 1 instrumental song among 8 candidates. It changed the penalty to grow with distance (section 10). The tests caught this, not me. In 1.0, a profile comparison the AI wrote didn't match the real output; checking every claim against a fresh run caught it (section 9).
+
+### 12.5 Future improvements
+
+1. **Rate the live picks.** Run the three demo moments, the guardrail cases, and some real prompts in AI mode, then have a few people rate the picks in a table: does each song fit the moment, and would they skip any? Log Claude's reasons so they can be checked too.
+2. **Check Claude's reasons, not just its IDs.** Reject a reason that contradicts the song's features, such as "acoustic" for a song with acousticness under 0.5.
+3. **Top up to 5 songs** from the retrieved candidates when the grounding check drops some.
+4. **Replace the crisis keyword list** with a classifier that handles paraphrases and other languages, and keep the list as a backstop.
+5. **Learn the nudges for each listener** from likes and skips, instead of one default for everyone.
+6. **Use real signals and a bigger catalog** through the existing interfaces: phone signals read on the device, and a Spotify `MusicSource`.
